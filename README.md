@@ -14,12 +14,30 @@ This project provides a Monaco Editor instance running inside an iframe, designe
     ```
     The editor will be available, typically at `http://localhost:3000`.
 
+## Docker Build & Run
+
+1.  **Build the Docker image:**
+    Make sure you have Docker installed and running. From the project root directory (where the `Dockerfile` is located), run:
+    ```bash
+    docker build -t monaco-editor-iframe .
+    ```
+    This will build the image and tag it as `monaco-editor-iframe`.
+
+2.  **Run the Docker container:**
+    ```bash
+    docker run -p 8080:80 monaco-editor-iframe
+    ```
+    *   `-p 8080:80` maps port 8080 on your host machine to port 80 inside the container (where Nginx is listening).
+    *   You can then access the editor application at `http://localhost:8080` in your browser.
+
 ## Parent Application Integration
 
 1.  **Embed the iframe:**
-    Add an `<iframe>` element to your parent application, setting its `src` attribute to the URL where the Monaco Editor component is hosted.
+    Add an `<iframe>` element to your parent application, setting its `src` attribute to the URL where the Monaco Editor component is hosted (e.g., the development server URL or the Docker container URL).
     ```html
     <iframe id="monacoEditorFrame" src="http://localhost:3000/index.html" style="width: 100%; height: 600px; border: none;"></iframe>
+    <!-- Or if using Docker: -->
+    <!-- <iframe id="monacoEditorFrame" src="http://localhost:8080/index.html" style="width: 100%; height: 600px; border: none;"></iframe> -->
     ```
 
 2.  **Communicate via `postMessage`:**
@@ -31,7 +49,8 @@ This project provides a Monaco Editor instance running inside an iframe, designe
     // --- Sending Messages to the Editor --- 
     function postEditorMessage(type, payload = {}) {
         // Wait for editor readiness if necessary
-        editorFrame.contentWindow.postMessage({ type, payload }, 'TARGET_ORIGIN'); // Replace TARGET_ORIGIN
+        // Replace TARGET_ORIGIN with the actual origin (e.g., 'http://localhost:8080')
+        editorFrame.contentWindow.postMessage({ type, payload }, 'TARGET_ORIGIN'); 
     }
 
     // Example: Set content
@@ -40,7 +59,8 @@ This project provides a Monaco Editor instance running inside an iframe, designe
     // --- Receiving Messages from the Editor --- 
     window.addEventListener('message', (event) => {
         // **IMPORTANT SECURITY:** Always verify the origin of the message!
-        // if (event.origin !== "EXPECTED_EDITOR_ORIGIN") { // Replace EXPECTED_EDITOR_ORIGIN
+        // Replace EXPECTED_EDITOR_ORIGIN with the actual origin (e.g., 'http://localhost:8080')
+        // if (event.origin !== "EXPECTED_EDITOR_ORIGIN") { 
         //   console.warn('Message received from unexpected origin:', event.origin);
         //   return;
         // }
@@ -55,7 +75,7 @@ This project provides a Monaco Editor instance running inside an iframe, designe
             // Handle events like contentChanged, cursorPositionChanged, etc.
         } else if (type === 'response') {
             console.log(`Response Received (subType: ${subType}, correlationId: ${correlationId}):`, rest);
-            // Handle responses to specific requests (getContent, getSelection, etc.)
+            // Handle responses to specific requests (getContent, getSettings, etc.)
             // Use correlationId to match response to request
         } else if (type === 'error') {
             console.error(`Editor Error (request: ${event.data.requestType}):`, event.data.message);
@@ -65,7 +85,7 @@ This project provides a Monaco Editor instance running inside an iframe, designe
     });
     ```
 
-    **Note:** Replace `TARGET_ORIGIN` with the actual origin where the editor iframe is hosted (e.g., `'http://localhost:3000'`) for security. Similarly, replace `EXPECTED_EDITOR_ORIGIN` when checking received messages.
+    **Note:** Replace `TARGET_ORIGIN` with the actual origin where the editor iframe is hosted (e.g., `'http://localhost:3000'` or `'http://localhost:8080'`) for security. Similarly, replace `EXPECTED_EDITOR_ORIGIN` when checking received messages.
 
 ## `postMessage` API Reference
 
@@ -79,7 +99,7 @@ These are the message `type` values you can send *to* the editor iframe.
     *   `payload`: `{ settings: IEditorOptions }`
     *   See Monaco Editor Docs for [IEditorOptions](https://microsoft.github.io/monaco-editor/typedoc/variables/editor.EditorOptions.html).
 *   **`setLanguage`**: Changes the editor's language mode.
-    *   `payload`: `{ language: string }` (e.g., `'javascript'`, `'python'`, `'json'`). Also resets content to a default for JSON/Python.
+    *   `payload`: `{ language: string }` (e.g., `'javascript'`, `'python'`, `'json'`).
 *   **`triggerAction`**: Executes a built-in editor action.
     *   `payload`: `{ actionId: string, args?: any }`
     *   Common `actionId` examples: `'editor.action.formatDocument'`, `'undo'`, `'redo'`, `'actions.find'`.
@@ -95,8 +115,6 @@ These are the message `type` values you can send *to* the editor iframe.
         *   `payload`: `{ correlationId: string }` (Optional but recommended)
     *   **`getSettings`**: Requests the current editor settings object.
         *   `payload`: `{ correlationId: string }` (Optional but recommended)
-    *   **`getSelection`**: Requests the currently selected text.
-        *   `payload`: `{ correlationId: string }` (Optional but recommended)
     *   **`getModelMarkers`**: Requests diagnostic markers (errors, warnings).
         *   `payload`: `{ correlationId: string }` (Optional but recommended)
 
@@ -106,18 +124,16 @@ These are the message `type` values the editor iframe sends *to* the parent.
 
 *   **`editorReady`**: Sent once when the editor is initialized and ready to receive messages.
 *   **`editorEvent`**: Sent when specific editor events occur.
-    *   `event`: The name of the event (e.g., `'contentChanged'`, `'cursorPositionChanged'`, `'selectionChanged'`).
+    *   `event`: The name of the event (e.g., `'contentChanged'`, `'cursorPositionChanged'`).
     *   `payload`: Event-specific data provided by Monaco.
         *   `contentChanged`: Includes `{ content: string, event: IModelContentChangedEvent }`
         *   `cursorPositionChanged`: Includes `{ position: IPosition, ... }`
-        *   `selectionChanged`: Includes `{ selection: ISelection, ... }`
 *   **`response`**: Sent in reply to a request message (`getContent`, `getSettings`, etc.).
     *   `correlationId`: Matches the `correlationId` sent in the original request.
-    *   `subType`: Indicates the type of data being returned (e.g., `'editorContent'`, `'editorSettings'`, `'editorSelection'`, `'editorMarkers'`).
+    *   `subType`: Indicates the type of data being returned (e.g., `'editorContent'`, `'editorSettings'`, `'editorMarkers'`).
     *   Additional properties depend on `subType`:
         *   `editorContent`: Includes `content: string`
         *   `editorSettings`: Includes `settings: IEditorOptions`
-        *   `editorSelection`: Includes `selectedText: string`
         *   `editorMarkers`: Includes `markers: IMarkerData[]`
 *   **`error`**: Sent if an error occurs within the iframe while processing a message.
     *   `message`: The error message string.
