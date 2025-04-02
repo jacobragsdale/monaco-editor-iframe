@@ -1,0 +1,21 @@
+{
+  "name": "monaco-editor-web",
+  "version": "1.0.0",
+  "description": "A web application with Monaco Editor",
+  "main": "index.js",
+  "scripts": {
+    "start": "webpack serve --mode development",
+    "build": "webpack --mode production"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.45.0"
+  },
+  "devDependencies": {
+    "webpack": "^5.90.3",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.0.2",
+    "monaco-editor-webpack-plugin": "^7.0.1",
+    "css-loader": "^6.10.0",
+    "style-loader": "^3.3.4"
+  }
+} 

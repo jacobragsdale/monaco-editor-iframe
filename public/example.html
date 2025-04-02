@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monaco Editor Parent App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .controls {
+            flex: 0 0 350px; /* Increased width */
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .editor-container {
+            flex: 1;
+            height: 700px; /* Increased height */
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            position: relative;
+        }
+        #editorFrame {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        button, select {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 100%;
+            box-sizing: border-box; /* Include padding in width */
+        }
+        button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        label {
+            display: block;
+            margin-top: 5px;
+            margin-bottom: 2px;
+            font-weight: bold;
+        }
+        .info-display {
+            margin-top: 10px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-size: 0.9em;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .status {
+            font-style: italic;
+            color: #6c757d;
+            font-size: 0.8em;
+            text-align: center;
+            margin-top: 10px;
+        }
+        .loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2em;
+            z-index: 10;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Monaco Editor Parent Application</h1>
+    <div class="container">
+        <div class="controls">
+            <div>
+                <label>Editor Interaction</label>
+                <button onclick="requestContent()">Get Content</button>
+                <button onclick="setContent()">Set Content</button>
+                <button onclick="focusEditor()">Focus Editor</button>
+                <button onclick="blurEditor()">Blur Editor</button>
+            </div>
+
+            <div>
+                <label>Actions</label>
+                <button onclick="triggerAction('editor.action.formatDocument')">Format Document</button>
+                <button onclick="triggerAction('undo')">Undo</button>
+                <button onclick="triggerAction('redo')">Redo</button>
+                <button onclick="triggerAction('actions.find')">Find Text (Ctrl+F)</button>
+                <button onclick="triggerAction('editor.action.startFindReplaceAction')">Find & Replace (Ctrl+H)</button>
+            </div>
+            
+            <div>
+                <label for="languageSelect">Language</label>
+                <select id="languageSelect" onchange="changeLanguage()">
+                    <option value="javascript">JavaScript</option>
+                    <option value="typescript">TypeScript</option>
+                    <option value="json">JSON</option>
+                    <option value="python">Python</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="themeSelect">Theme</label>
+                <select id="themeSelect" onchange="changeTheme()">
+                    <option value="vs-dark">VS Dark</option>
+                    <option value="vs">VS Light</option>
+                    <option value="hc-black">High Contrast Black</option>
+                    <option value="hc-light">High Contrast Light</option>
+                </select>
+            </div>
+
+            <div>
+                <label>Editor Settings</label>
+                <button onclick="toggleMinimap()">Toggle Minimap</button>
+                <button onclick="toggleReadOnly()">Toggle ReadOnly</button>
+            </div>
+
+            <div>
+                 <label>Event Logs / Responses</label>
+                 <button onclick="clearLogs()">Clear Logs</button>
+                 <div class="info-display" id="info-display">Logs will appear here...</div>
+            </div>
+            <div class="status" id="status">Loading Editor...</div>
+        </div>
+        <div class="editor-container">
+             <div class="loading-overlay" id="loading-overlay">Loading...</div>
+            <iframe id="editorFrame" src="index.html"></iframe>
+        </div>
+    </div>
+
+    <script>
+        const editorFrame = document.getElementById('editorFrame');
+        const infoDisplay = document.getElementById('info-display');
+        const statusDiv = document.getElementById('status');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        
+        let minimapEnabled = true;
+        let readOnlyEnabled = false;
+        let isEditorReady = false;
+        let requestCounter = 0;
+        const pendingRequests = new Map(); // To track responses
+
+        function logInfo(type, data) {
+            if (infoDisplay.textContent === "Logs will appear here...") {
+                infoDisplay.textContent = "";
+            }
+            const logEntry = document.createElement('div');
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${type}: ${JSON.stringify(data, null, 2)}`;
+            infoDisplay.appendChild(logEntry);
+            infoDisplay.scrollTop = infoDisplay.scrollHeight; // Auto-scroll
+        }
+
+        function clearLogs() {
+            infoDisplay.textContent = "Logs will appear here...";
+        }
+
+        function postEditorMessage(type, payload = {}) {
+            if (!isEditorReady) {
+                logInfo("Warn", "Editor not ready yet.");
+                return;
+            }
+            editorFrame.contentWindow.postMessage({ type, payload }, '*');
+        }
+
+        // Function to handle requests that expect a response
+        function postRequest(type, payload = {}) {
+            return new Promise((resolve, reject) => {
+                if (!isEditorReady) {
+                    return reject(new Error("Editor not ready yet."));
+                }
+                const correlationId = `req-${requestCounter++}`;
+                pendingRequests.set(correlationId, { resolve, reject, type });
+                editorFrame.contentWindow.postMessage({ type, payload: { ...payload, correlationId } }, '*');
+                
+                // Timeout for requests
+                setTimeout(() => {
+                    if (pendingRequests.has(correlationId)) {
+                        pendingRequests.delete(correlationId);
+                        reject(new Error(`Request ${type} (${correlationId}) timed out.`));
+                    }
+                }, 5000); // 5 second timeout
+            });
+        }
+
+        // --- Control Functions --- 
+        async function requestContent() {
+            try {
+                const response = await postRequest('getContent');
+                logInfo("Get Content Response", response.content);
+            } catch (error) {
+                logInfo("Get Content Error", error.message);
+            }
+        }
+
+        function setContent() {
+            const newContent = `// Content set at ${new Date().toLocaleTimeString()}\nfunction updated() {\n  console.log("Updated!");\n}\n`;
+            postEditorMessage('setContent', { content: newContent });
+            logInfo("Set Content Sent", { content: newContent.substring(0, 50) + "..." });
+        }
+
+        function changeTheme() {
+            const theme = document.getElementById('themeSelect').value;
+            postEditorMessage('updateSettings', { settings: { theme: theme } });
+            logInfo("Change Theme Sent", { theme });
+        }
+
+        function toggleMinimap() {
+            minimapEnabled = !minimapEnabled;
+            postEditorMessage('updateSettings', { settings: { minimap: { enabled: minimapEnabled } } });
+            logInfo("Toggle Minimap Sent", { enabled: minimapEnabled });
+        }
+        
+        function toggleReadOnly() {
+            readOnlyEnabled = !readOnlyEnabled;
+            postEditorMessage('updateSettings', { settings: { readOnly: readOnlyEnabled } });
+            logInfo("Toggle ReadOnly Sent", { readOnly: readOnlyEnabled });
+        }
+
+        function changeLanguage() {
+            const language = document.getElementById('languageSelect').value;
+            postEditorMessage('setLanguage', { language });
+            logInfo("Change Language Sent", { language });
+        }
+
+        function triggerAction(actionId) {
+            postEditorMessage('triggerAction', { actionId });
+            logInfo("Trigger Action Sent", { actionId });
+        }
+
+        function focusEditor() {
+            postEditorMessage('focusEditor');
+            logInfo("Focus Editor Sent", {});
+        }
+
+        function blurEditor() {
+            postEditorMessage('blurEditor');
+            logInfo("Blur Editor Sent", {});
+        }
+
+        // Listen for messages from the iframe
+        window.addEventListener('message', (event) => {
+            // IMPORTANT: Check event.origin in production
+            // if (event.origin !== "YOUR_MONACO_APP_ORIGIN") return;
+
+            const { type, event: eventName, payload, correlationId, subType, content, settings, selection, markers, message, requestType } = event.data;
+
+            if (type === 'editorReady') {
+                isEditorReady = true;
+                loadingOverlay.style.display = 'none';
+                statusDiv.textContent = "Editor Ready";
+                logInfo("System", "Editor iframe reported ready.");
+            } else if (type === 'editorEvent') {
+                logInfo(`Event: ${eventName}`, payload);
+                // Update status or UI based on events if needed
+                if (eventName === 'cursorPositionChanged') {
+                    statusDiv.textContent = `Ln ${payload.position.lineNumber}, Col ${payload.position.column}`;
+                }
+            } else if (type === 'response') {
+                 if (correlationId && pendingRequests.has(correlationId)) {
+                    const { resolve } = pendingRequests.get(correlationId);
+                    resolve(event.data); // Resolve promise with the full response data
+                    pendingRequests.delete(correlationId);
+                 } else {
+                     // Handle unsolicited responses if necessary
+                     logInfo(`Response (subType: ${subType})`, event.data);
+                 }
+            } else if (type === 'error') {
+                logInfo(`Editor Error (request: ${requestType})`, message);
+                if (correlationId && pendingRequests.has(correlationId)) {
+                    const { reject } = pendingRequests.get(correlationId);
+                    reject(new Error(message));
+                    pendingRequests.delete(correlationId);
+                }
+            } else {
+                logInfo("Unknown Message", event.data);
+            }
+        });
+
+         // Add dynamic CSS for decorations
+        const style = document.createElement('style');
+        style.innerHTML = `
+            .myInlineDecoration {
+                background-color: rgba(255, 255, 0, 0.3); /* Yellow highlight */
+                cursor: pointer;
+            }
+        `;
+        document.head.appendChild(style);
+
+    </script>
+</body>
+</html> 
