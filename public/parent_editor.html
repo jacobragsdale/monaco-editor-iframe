@@ -110,9 +110,9 @@
             <div>
                 <label for="languageSelect">Language</label>
                 <select id="languageSelect" onchange="changeLanguage()">
+                    <option value="json">JSON</option>
                     <option value="javascript">JavaScript</option>
                     <option value="typescript">TypeScript</option>
-                    <option value="json">JSON</option>
                     <option value="python">Python</option>
                 </select>
             </div>
@@ -142,7 +142,7 @@
         </div>
         <div class="editor-container">
              <div class="loading-overlay" id="loading-overlay">Loading...</div>
-            <iframe id="editorFrame" src="index.html"></iframe>
+            <iframe id="editorFrame" src="editor.html"></iframe>
         </div>
     </div>
 
@@ -211,7 +211,15 @@
         }
 
         function setContent() {
-            const newContent = `// Content set at ${new Date().toLocaleTimeString()}\nfunction updated() {\n  console.log("Updated!");\n}\n`;
+            const newContent = `{
+  "timestamp": "${new Date().toISOString()}",
+  "data": {
+    "name": "Example JSON",
+    "type": "configuration",
+    "enabled": true,
+    "values": [1, 2, 3, 4, 5]
+  }
+}`;
             postEditorMessage('setContent', { content: newContent });
             logInfo("Set Content Sent", { content: newContent.substring(0, 50) + "..." });
         }

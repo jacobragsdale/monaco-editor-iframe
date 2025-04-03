@@ -1,10 +1,13 @@
 const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin');
 
 module.exports = {
-  entry: './src/index.js',
+  entry: {
+    editor: './src/editor.js',
+    diff: './src/diff.js'
+  },
   output: {
     path: __dirname + '/dist',
-    filename: 'bundle.js',
+    filename: '[name]_bundle.js',
     publicPath: '/',
     globalObject: 'self'
   },
@@ -85,7 +88,8 @@ module.exports = {
         'wordWrapMinified',
         'wrappingIndent',
         'wrappingStrategy',
-        'zones'
+        'zones',
+        'diffEditor'
       ],
       filename: '[name].worker.js',
       publicPath: '/'

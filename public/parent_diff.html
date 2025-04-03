@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monaco Diff Editor Parent</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .controls { display: flex; gap: 10px; flex-wrap: wrap; padding: 15px; background: #f5f5f5; border-radius: 8px; }
+        .control-group { display: flex; flex-direction: column; gap: 5px; min-width: 150px; }
+        textarea { width: 100%; min-height: 100px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; }
+        button, select { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #007bff; color: white; cursor: pointer; width: 100%; }
+        button:hover { background: #0056b3; }
+        label { font-weight: bold; margin-bottom: 3px; font-size: 0.9em; }
+        #diff-editor-iframe-container { flex-grow: 1; height: 60vh; border: 1px solid #ccc; border-radius: 8px; position: relative; }
+        iframe { width: 100%; height: 100%; border: none; }
+        .loading-overlay { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.8); display: flex; justify-content: center; align-items: center; font-size: 1.2em; z-index: 10; border-radius: 8px; }
+        #log-display { margin-top: 10px; padding: 10px; background: #e9ecef; border-radius: 4px; font-size: 0.9em; white-space: pre-wrap; word-wrap: break-word; max-height: 150px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>Monaco Diff Editor Parent</h1>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="originalText">Original Text:</label>
+            <textarea id="originalText">{
+  "config": {
+    "name": "Original Config",
+    "version": "1.0.0",
+    "enabled": true,
+    "items": [
+      "item1",
+      "item2"
+    ]
+  }
+}</textarea>
+        </div>
+        <div class="control-group">
+            <label for="modifiedText">Modified Text:</label>
+            <textarea id="modifiedText">{
+  "config": {
+    "name": "Updated Config",
+    "version": "2.0.0",
+    "enabled": false,
+    "items": [
+      "item1",
+      "item3",
+      "item4"
+    ],
+    "newSetting": true
+  }
+}</textarea>
+        </div>
+        <div class="control-group">
+            <label for="diffLanguage">Language:</label>
+            <select id="diffLanguage">
+                <option value="json" selected>JSON</option>
+                <option value="javascript">JavaScript</option>
+                <option value="python">Python</option>
+                <option value="text/plain">Plain Text</option>
+            </select>
+            <label for="diffTheme">Theme:</label>
+            <select id="diffTheme">
+                <option value="vs-dark" selected>VS Dark</option>
+                <option value="vs">VS Light</option>
+                <option value="hc-black">High Contrast Black</option>
+                <option value="hc-light">High Contrast Light</option>
+            </select>
+             <label>Actions:</label>
+             <button onclick="setDiff()">Set Diff Content</button>
+             <button onclick="toggleInlineView()">Toggle Inline View</button>
+             <button onclick="clearLogs()">Clear Logs</button>
+        </div>
+    </div>
+
+    <div id="diff-editor-iframe-container">
+        <div class="loading-overlay" id="loading-overlay">Loading...</div>
+        <!-- Note: src points to diff.html -->
+        <iframe id="diffEditorFrame" src="diff.html"></iframe>
+    </div>
+    
+    <div id="log-display">Logs will appear here...</div>
+
+    <script>
+        const diffFrame = document.getElementById('diffEditorFrame');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const logDisplay = document.getElementById('log-display');
+        
+        let isDiffEditorReady = false;
+        let isInlineView = false;
+
+        function logInfo(type, data) {
+             if (logDisplay.textContent === "Logs will appear here...") {
+                logDisplay.textContent = "";
+            }
+            const logEntry = document.createElement('div');
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${type}: ${JSON.stringify(data, null, 2)}`;
+            logDisplay.appendChild(logEntry);
+            logDisplay.scrollTop = logDisplay.scrollHeight;
+        }
+
+        function clearLogs() {
+            logDisplay.textContent = "Logs will appear here...";
+        }
+
+        function postDiffMessage(type, payload = {}) {
+            if (!isDiffEditorReady) {
+                logInfo("Warn", "Diff Editor not ready yet.");
+                return;
+            }
+            // IMPORTANT: Replace '*' with the actual origin in production
+            diffFrame.contentWindow.postMessage({ type, payload }, '*'); 
+        }
+
+        function setDiff() {
+            const original = document.getElementById('originalText').value;
+            const modified = document.getElementById('modifiedText').value;
+            const language = document.getElementById('diffLanguage').value;
+            postDiffMessage('setDiffContent', {
+                originalContent: original,
+                modifiedContent: modified,
+                language: language
+            });
+            logInfo("Sent setDiffContent", { language });
+        }
+
+        function changeTheme() {
+             const theme = document.getElementById('diffTheme').value;
+             postDiffMessage('updateDiffSettings', { settings: { theme: theme } });
+             logInfo("Sent updateDiffSettings (Theme)", { theme });
+        }
+        // Attach listener to theme selector
+        document.getElementById('diffTheme').addEventListener('change', changeTheme);
+        
+        function toggleInlineView() {
+            isInlineView = !isInlineView;
+            postDiffMessage('updateDiffSettings', { settings: { renderSideBySide: !isInlineView } });
+            logInfo("Sent updateDiffSettings (Render Style)", { renderSideBySide: !isInlineView });
+        }
+
+        // Listen for messages from the iframe
+        window.addEventListener('message', (event) => {
+            // IMPORTANT: Check event.origin in production
+            // if (event.origin !== "YOUR_DIFF_EDITOR_ORIGIN") return;
+
+            const { type, event: eventName, payload, correlationId, subType, ...rest } = event.data;
+
+            if (type === 'diffEditorReady') {
+                isDiffEditorReady = true;
+                loadingOverlay.style.display = 'none';
+                logInfo("System", "Diff Editor iframe reported ready.");
+                // Set initial content on ready
+                setDiff(); 
+                changeTheme(); // Set initial theme
+            } else if (type === 'response') {
+                 logInfo(`Response (subType: ${subType}, correlationId: ${correlationId}):`, rest);
+                 // Handle responses if needed (e.g., for getDiffContent)
+            } else if (type === 'error') {
+                logInfo(`Editor Error (request: ${event.data.requestType})`, event.data.message);
+            } else {
+                logInfo("Unknown Message", event.data);
+            }
+        });
+    </script>
+</body>
+</html> 
