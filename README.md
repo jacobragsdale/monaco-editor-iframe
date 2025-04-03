@@ -63,6 +63,308 @@ This project provides Monaco Editor instances running inside iframes, designed t
 2.  **Communicate via `postMessage`:**
     (See API reference below)
 
+## Usage Examples
+
+### Standard Editor Basic Integration
+
+```javascript
+// Reference to the iframe
+const editorFrame = document.getElementById('monacoEditorFrame');
+let isEditorReady = false;
+
+// Listen for messages from the iframe
+window.addEventListener('message', (event) => {
+    // In production, always check event.origin for security
+    
+    const { type, event: eventName, payload } = event.data;
+    
+    if (type === 'editorReady') {
+        console.log('Editor is ready to use!');
+        isEditorReady = true;
+        
+        // Once ready, you can set initial content
+        setEditorContent('{"example": "JSON content"}');
+    } else if (type === 'editorEvent' && eventName === 'contentChanged') {
+        console.log('Content changed:', payload.content);
+    }
+});
+
+// Helper function to post messages to the editor
+function postToEditor(type, payload = {}) {
+    if (!isEditorReady) {
+        console.warn('Editor not ready yet');
+        return;
+    }
+    editorFrame.contentWindow.postMessage({ type, payload }, '*');
+}
+
+// Example functions for common operations
+function setEditorContent(content) {
+    postToEditor('setContent', { content });
+}
+
+function getEditorContent() {
+    return new Promise((resolve) => {
+        const handler = (event) => {
+            const { type, subType, content } = event.data;
+            if (type === 'response' && subType === 'editorContent') {
+                resolve(content);
+                window.removeEventListener('message', handler);
+            }
+        };
+        
+        window.addEventListener('message', handler);
+        postToEditor('getContent');
+    });
+}
+
+function changeLanguage(language) {
+    postToEditor('setLanguage', { language });
+}
+
+function formatDocument() {
+    postToEditor('triggerAction', { actionId: 'editor.action.formatDocument' });
+}
+
+// Usage example
+async function demo() {
+    // Set some content
+    setEditorContent('{"name": "Example", "value": 42}');
+    
+    // Change language
+    changeLanguage('javascript');
+    
+    // Format the document
+    formatDocument();
+    
+    // Get the current content
+    const content = await getEditorContent();
+    console.log('Current content:', content);
+}
+```
+
+### Diff Editor Basic Integration
+
+```javascript
+// Reference to the iframe
+const diffFrame = document.getElementById('diffEditorFrame');
+let isDiffEditorReady = false;
+
+// Listen for messages from the iframe
+window.addEventListener('message', (event) => {
+    // In production, always check event.origin for security
+    
+    const { type } = event.data;
+    
+    if (type === 'diffEditorReady') {
+        console.log('Diff Editor is ready to use!');
+        isDiffEditorReady = true;
+        
+        // Once ready, you can set initial diff content
+        setDiffContent(
+            '{"version": "1.0.0", "enabled": true}',
+            '{"version": "2.0.0", "enabled": false}'
+        );
+    }
+});
+
+// Helper function to post messages to the diff editor
+function postToDiffEditor(type, payload = {}) {
+    if (!isDiffEditorReady) {
+        console.warn('Diff Editor not ready yet');
+        return;
+    }
+    diffFrame.contentWindow.postMessage({ type, payload }, '*');
+}
+
+// Example functions for common operations
+function setDiffContent(originalContent, modifiedContent, language = 'json') {
+    postToDiffEditor('setDiffContent', { 
+        originalContent, 
+        modifiedContent,
+        language
+    });
+}
+
+function toggleInlineView() {
+    postToDiffEditor('updateDiffSettings', {
+        settings: { renderSideBySide: false }
+    });
+}
+
+function toggleSideBySideView() {
+    postToDiffEditor('updateDiffSettings', {
+        settings: { renderSideBySide: true }
+    });
+}
+
+function getDiffContent() {
+    return new Promise((resolve) => {
+        const handler = (event) => {
+            const { type, subType, originalContent, modifiedContent } = event.data;
+            if (type === 'response' && subType === 'diffContent') {
+                resolve({ originalContent, modifiedContent });
+                window.removeEventListener('message', handler);
+            }
+        };
+        
+        window.addEventListener('message', handler);
+        postToDiffEditor('getDiffContent');
+    });
+}
+
+// Usage example
+async function diffDemo() {
+    // Set initial diff content
+    setDiffContent(
+        '{\n  "config": {\n    "version": "1.0",\n    "active": true\n  }\n}',
+        '{\n  "config": {\n    "version": "1.1",\n    "active": false,\n    "newField": true\n  }\n}'
+    );
+    
+    // Change to inline view
+    toggleInlineView();
+    
+    // Then back to side-by-side
+    setTimeout(() => {
+        toggleSideBySideView();
+    }, 2000);
+    
+    // Get current diff content
+    const content = await getDiffContent();
+    console.log('Original:', content.originalContent);
+    console.log('Modified:', content.modifiedContent);
+}
+```
+
+### Advanced Usage Examples
+
+#### Handling Correlation IDs for Multiple Concurrent Requests
+
+```javascript
+let requestCounter = 0;
+const pendingRequests = new Map();
+
+function makeRequest(editorFrame, type, payload = {}) {
+    return new Promise((resolve, reject) => {
+        const correlationId = `req-${Date.now()}-${requestCounter++}`;
+        
+        const handler = (event) => {
+            const { type: respType, correlationId: respId } = event.data;
+            
+            if (respId === correlationId) {
+                if (respType === 'response') {
+                    resolve(event.data);
+                } else if (respType === 'error') {
+                    reject(new Error(event.data.message));
+                }
+                window.removeEventListener('message', handler);
+            }
+        };
+        
+        window.addEventListener('message', handler);
+        
+        // Set timeout to prevent hanging promises
+        setTimeout(() => {
+            const stillPending = pendingRequests.has(correlationId);
+            if (stillPending) {
+                pendingRequests.delete(correlationId);
+                reject(new Error(`Request timed out: ${type}`));
+                window.removeEventListener('message', handler);
+            }
+        }, 5000);
+        
+        // Send the request
+        editorFrame.contentWindow.postMessage({
+            type,
+            payload: { ...payload, correlationId }
+        }, '*');
+    });
+}
+
+// Usage
+async function multipleRequests() {
+    try {
+        // These requests can happen concurrently
+        const [content, settings] = await Promise.all([
+            makeRequest(editorFrame, 'getContent'),
+            makeRequest(editorFrame, 'getSettings')
+        ]);
+        
+        console.log('Content:', content);
+        console.log('Settings:', settings);
+    } catch (error) {
+        console.error('Request failed:', error);
+    }
+}
+```
+
+#### Debouncing Editor Events
+
+```javascript
+// Debounce function to limit how often a function runs
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+}
+
+// Listen for content changes with debouncing
+const handleContentChange = debounce((content) => {
+    console.log('Content changed (debounced):', content);
+    // Process content here, e.g., save to localStorage
+}, 500);
+
+window.addEventListener('message', (event) => {
+    const { type, event: eventName, payload } = event.data;
+    
+    if (type === 'editorEvent' && eventName === 'contentChanged') {
+        handleContentChange(payload.content);
+    }
+});
+```
+
+#### Setting Different Editor Themes
+
+```javascript
+function changeEditorTheme(theme) {
+    postToEditor('updateSettings', {
+        settings: { theme }
+    });
+}
+
+// Available themes
+const themes = [
+    'vs-dark',    // Dark theme (default)
+    'vs',         // Light theme
+    'hc-black',   // High contrast dark
+    'hc-light'    // High contrast light
+];
+
+// Example: Switch to light theme
+changeEditorTheme('vs');
+
+// Create a theme selector
+function createThemeSelector(container) {
+    const select = document.createElement('select');
+    
+    themes.forEach(theme => {
+        const option = document.createElement('option');
+        option.value = theme;
+        option.textContent = theme;
+        if (theme === 'vs-dark') option.selected = true;
+        select.appendChild(option);
+    });
+    
+    select.addEventListener('change', () => {
+        changeEditorTheme(select.value);
+    });
+    
+    container.appendChild(select);
+}
+```
+
 **General Communication Pattern:**
 
 ```javascript
