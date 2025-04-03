@@ -16,17 +16,46 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
       
-      - name: Verify nginx.conf exists
+      - name: Check for nginx.conf and create if missing
         run: |
           if [ -f nginx.conf ]; then
-            echo "✅ nginx.conf found"
+            echo "✅ nginx.conf found in repository"
             cat nginx.conf | head -5
           else
-            echo "❌ nginx.conf not found in repository root"
-            echo "Please ensure nginx.conf is committed to your repository"
-            ls -la
-            exit 1
+            echo "⚠️ nginx.conf not found in repository, creating it..."
+            cat > nginx.conf << 'EOF'
+server {
+    listen 80;
+    server_name localhost;
+
+    root /usr/share/nginx/html;
+    index editor.html index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ /editor.html;
+
+        # Required headers for SharedArrayBuffer (needed by Monaco features)
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    }
+
+    # Improve caching for static assets
+    location ~* \.(?:css|js|woff2?|ttf|eot|svg|png|jpg|jpeg|gif)$ {
+        expires 1y;
+        add_header Cache-Control "public";
+        access_log off;
+        
+        # Required headers for SharedArrayBuffer
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    }
+}
+EOF
+            echo "✅ nginx.conf created"
           fi
+          
+          # Verify the file exists and is readable
+          ls -la nginx.conf
       
       - name: Build Docker image
         run: |
